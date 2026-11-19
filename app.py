@@ -21,6 +21,11 @@ from db import get_connection
 from security.passwords import verify_password
 from security.encryption import decrypt_secret
 from security.mfa import verify_mfa_code
+from security.throttle import (
+    get_auth_status,
+    record_auth_failure,
+    reset_auth_failures
+)
 
 
 # ==========================================
@@ -40,7 +45,7 @@ app.config.update(
     SECRET_KEY=secret_key,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=False,  # Local HTTP development only
+    SESSION_COOKIE_SECURE=False,  # Local HTTP only
     PERMANENT_SESSION_LIFETIME=timedelta(minutes=30)
 )
 
@@ -48,6 +53,11 @@ PRIVILEGED_ROLES = {"instructor", "security_admin"}
 
 MFA_CHALLENGE_TIMEOUT = 300
 MAX_MFA_ATTEMPTS = 5
+
+LOCKOUT_MESSAGE = (
+    "Too many authentication attempts. "
+    "Please try again later."
+)
 
 
 # ==========================================
@@ -75,7 +85,7 @@ def valid_csrf():
 
 
 # ==========================================
-# CURRENT AUTHENTICATED USER
+# AUTHENTICATED USER
 # ==========================================
 
 def current_user():
@@ -90,8 +100,7 @@ def current_user():
         return conn.execute("""
             SELECT id, username, full_name, role
             FROM users
-            WHERE id = ?
-              AND is_active = 1
+            WHERE id = ? AND is_active = 1
         """, (user_id,)).fetchone()
 
     finally:
@@ -115,26 +124,16 @@ def login_required(view):
 # ==========================================
 
 def establish_session(user_id):
-    """
-    Create a fully authenticated session.
-
-    Called immediately for students, but only
-    after successful MFA for privileged accounts.
-    """
     session.clear()
+
     session["user_id"] = user_id
     session["authenticated_at"] = int(time.time())
     session.permanent = True
+
     csrf_token()
 
 
 def start_mfa_challenge(user_id):
-    """
-    Create a temporary, incomplete login session.
-
-    A pending MFA session does not contain user_id
-    and cannot access protected application routes.
-    """
     session.clear()
 
     session["pending_mfa_user_id"] = user_id
@@ -147,8 +146,13 @@ def start_mfa_challenge(user_id):
 
 def clear_expired_mfa_challenge():
     started = session.get("pending_mfa_started")
+    attempts = session.get("mfa_attempts", 0)
 
     if not isinstance(started, int):
+        session.clear()
+        return True
+
+    if not isinstance(attempts, int):
         session.clear()
         return True
 
@@ -158,7 +162,7 @@ def clear_expired_mfa_challenge():
         session.clear()
         return True
 
-    if session.get("mfa_attempts", 0) >= MAX_MFA_ATTEMPTS:
+    if attempts >= MAX_MFA_ATTEMPTS:
         session.clear()
         return True
 
@@ -166,7 +170,7 @@ def clear_expired_mfa_challenge():
 
 
 # ==========================================
-# HOME PAGE
+# HOME
 # ==========================================
 
 @app.route("/")
@@ -178,7 +182,7 @@ def home():
 
 
 # ==========================================
-# PASSWORD AUTHENTICATION
+# PASSWORD LOGIN + PERSISTENT THROTTLING
 # ==========================================
 
 @app.route("/login", methods=["GET", "POST"])
@@ -194,70 +198,112 @@ def login():
 
         username = request.form.get(
             "username", ""
-        ).strip()
+        ).strip().lower()
 
         password = request.form.get(
             "password", ""
         )
 
-        conn = get_connection()
+        # Validate username before querying the database
+        # or creating throttling records.
+        if not username or len(username) > 150:
+            error = "Invalid username or password."
 
-        try:
-            user = conn.execute("""
-                SELECT id, username, role,
-                       password_hash, is_active
-                FROM users
-                WHERE username = ?
-            """, (username,)).fetchone()
-
-            authenticated = (
-                user is not None
-                and user["is_active"] == 1
-                and verify_password(
-                    user["password_hash"],
-                    password
-                )
+        else:
+            status = get_auth_status(
+                username, "password"
             )
 
-            if not authenticated:
-                error = "Invalid username or password."
-
-            elif user["role"] in PRIVILEGED_ROLES:
-                # MFA enrollment must exist before
-                # privileged authentication can proceed.
-                credential = conn.execute("""
-                    SELECT is_enabled
-                    FROM mfa_credentials
-                    WHERE user_id = ?
-                """, (user["id"],)).fetchone()
-
-                if (
-                    credential is None
-                    or credential["is_enabled"] != 1
-                ):
-                    error = (
-                        "MFA enrollment is required "
-                        "for this account."
-                    )
-                else:
-                    start_mfa_challenge(user["id"])
-
-                    return redirect(
-                        url_for("verify_mfa")
-                    )
-
-            elif user["role"] == "student":
-                establish_session(user["id"])
-
-                return redirect(
-                    url_for("academic_records")
-                )
+            if status["blocked"]:
+                error = LOCKOUT_MESSAGE
 
             else:
-                error = "Authentication unavailable."
+                conn = get_connection()
 
-        finally:
-            conn.close()
+                try:
+                    user = conn.execute("""
+                        SELECT id, username, role,
+                               password_hash, is_active
+                        FROM users
+                        WHERE username = ?
+                    """, (username,)).fetchone()
+
+                    authenticated = (
+                        user is not None
+                        and user["is_active"] == 1
+                        and verify_password(
+                            user["password_hash"],
+                            password
+                        )
+                    )
+
+                    if not authenticated:
+                        status = record_auth_failure(
+                            username, "password"
+                        )
+
+                        error = (
+                            LOCKOUT_MESSAGE
+                            if status["blocked"]
+                            else "Invalid username or password."
+                        )
+
+                    elif user["role"] in PRIVILEGED_ROLES:
+                        # Check MFA enrollment before
+                        # issuing a pending challenge.
+                        credential = conn.execute("""
+                            SELECT is_enabled
+                            FROM mfa_credentials
+                            WHERE user_id = ?
+                        """, (user["id"],)).fetchone()
+
+                        if (
+                            credential is None
+                            or credential["is_enabled"] != 1
+                        ):
+                            error = (
+                                "MFA enrollment is required "
+                                "for this account."
+                            )
+
+                        else:
+                            # Successful first factor.
+                            reset_auth_failures(
+                                username, "password"
+                            )
+
+                            # Do not create fresh MFA challenges
+                            # while the account is MFA-locked.
+                            mfa_status = get_auth_status(
+                                username, "mfa"
+                            )
+
+                            if mfa_status["blocked"]:
+                                error = LOCKOUT_MESSAGE
+
+                            else:
+                                start_mfa_challenge(user["id"])
+
+                                return redirect(
+                                    url_for("verify_mfa")
+                                )
+
+                    elif user["role"] == "student":
+                        reset_auth_failures(
+                            username, "password"
+                        )
+
+                        establish_session(user["id"])
+
+                        return redirect(
+                            url_for("academic_records")
+                        )
+
+                    else:
+                        error = "Authentication unavailable."
+
+                finally:
+                    conn.close()
 
     return render_template(
         "login.html",
@@ -266,7 +312,7 @@ def login():
 
 
 # ==========================================
-# MFA VERIFICATION
+# MFA VERIFICATION + PERSISTENT THROTTLING
 # ==========================================
 
 @app.route("/verify-mfa", methods=["GET", "POST"])
@@ -274,7 +320,9 @@ def verify_mfa():
     if current_user() is not None:
         return redirect(url_for("home"))
 
-    pending_user_id = session.get("pending_mfa_user_id")
+    pending_user_id = session.get(
+        "pending_mfa_user_id"
+    )
 
     if pending_user_id is None:
         return redirect(url_for("login"))
@@ -282,39 +330,51 @@ def verify_mfa():
     if clear_expired_mfa_challenge():
         return redirect(url_for("login"))
 
-    error = None
+    conn = get_connection()
 
-    if request.method == "POST":
-        if not valid_csrf():
-            abort(400)
+    try:
+        account = conn.execute("""
+            SELECT
+                u.id,
+                u.username,
+                u.role,
+                u.is_active,
+                m.encrypted_secret,
+                m.last_used_step,
+                m.is_enabled
+            FROM users u
+            JOIN mfa_credentials m
+                ON m.user_id = u.id
+            WHERE u.id = ?
+        """, (pending_user_id,)).fetchone()
 
-        code = request.form.get("code", "").strip()
+        if (
+            account is None
+            or account["is_active"] != 1
+            or account["is_enabled"] != 1
+            or account["role"] not in PRIVILEGED_ROLES
+        ):
+            session.clear()
+            return redirect(url_for("login"))
 
-        conn = get_connection()
+        username = account["username"]
 
-        try:
-            account = conn.execute("""
-                SELECT
-                    u.id,
-                    u.role,
-                    u.is_active,
-                    m.encrypted_secret,
-                    m.last_used_step,
-                    m.is_enabled
-                FROM users u
-                JOIN mfa_credentials m
-                    ON m.user_id = u.id
-                WHERE u.id = ?
-            """, (pending_user_id,)).fetchone()
+        # Recheck persistent restrictions on every request.
+        status = get_auth_status(username, "mfa")
 
-            if (
-                account is None
-                or account["is_active"] != 1
-                or account["is_enabled"] != 1
-                or account["role"] not in PRIVILEGED_ROLES
-            ):
-                session.clear()
-                return redirect(url_for("login"))
+        if status["blocked"]:
+            session.clear()
+            return redirect(url_for("login"))
+
+        error = None
+
+        if request.method == "POST":
+            if not valid_csrf():
+                abort(400)
+
+            code = request.form.get(
+                "code", ""
+            ).strip()
 
             matched_step = None
 
@@ -330,14 +390,12 @@ def verify_mfa():
                 )
 
             except (ValueError, RuntimeError):
-                # Fail closed if encrypted credential
-                # cannot be loaded or authenticated.
+                # Fail closed if a secret cannot be
+                # decrypted or verified.
                 matched_step = None
 
             if matched_step is not None:
-                # Atomic conditional update:
-                # Only one request can consume a
-                # particular time step successfully.
+                # Atomic replay protection.
                 cursor = conn.execute("""
                     UPDATE mfa_credentials
                     SET last_used_step = ?
@@ -353,45 +411,63 @@ def verify_mfa():
                 if cursor.rowcount == 1:
                     conn.commit()
 
-                    establish_session(pending_user_id)
+                    reset_auth_failures(
+                        username, "mfa"
+                    )
 
-                    return redirect(url_for("home"))
+                    establish_session(
+                        pending_user_id
+                    )
+
+                    return redirect(
+                        url_for("home")
+                    )
 
                 conn.rollback()
+
+            # Failed second-factor verification.
+            status = record_auth_failure(
+                username, "mfa"
+            )
 
             session["mfa_attempts"] = (
                 session.get("mfa_attempts", 0) + 1
             )
 
             attempts_remaining = (
-                MAX_MFA_ATTEMPTS - session["mfa_attempts"]
+                MAX_MFA_ATTEMPTS
+                - session["mfa_attempts"]
             )
 
-            if attempts_remaining <= 0:
+            if (
+                status["blocked"]
+                or attempts_remaining <= 0
+            ):
                 session.clear()
-
-                return redirect(url_for("login"))
+                return redirect(
+                    url_for("login")
+                )
 
             error = (
                 "Invalid or previously used MFA code. "
                 f"{attempts_remaining} attempts remaining."
             )
 
-        finally:
-            conn.close()
-
-    return render_template(
-        "verify_mfa.html",
-        error=error,
-        attempts_remaining=(
-            MAX_MFA_ATTEMPTS
-            - session.get("mfa_attempts", 0)
+        return render_template(
+            "verify_mfa.html",
+            error=error,
+            attempts_remaining=(
+                MAX_MFA_ATTEMPTS
+                - session.get("mfa_attempts", 0)
+            )
         )
-    )
+
+    finally:
+        conn.close()
 
 
 # ==========================================
-# STUDENT RECORD ACCESS
+# PROTECTED STUDENT ACADEMIC RECORDS
 # ==========================================
 
 @app.route("/records")
@@ -447,7 +523,7 @@ def logout():
 
 
 # ==========================================
-# LOCAL DEVELOPMENT SERVER
+# LOCAL DEVELOPMENT
 # ==========================================
 
 if __name__ == "__main__":
