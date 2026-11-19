@@ -3,17 +3,185 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CampusShield</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CampusShield | Academic Records Portal</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f9;
+            color: #243247;
+        }
+
+        header {
+            background: #17365d;
+            color: white;
+            padding: 22px 8%;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+
+        header p {
+            margin: 7px 0 0;
+            color: #d6e3f3;
+        }
+
+        main {
+            max-width: 950px;
+            margin: 55px auto;
+            padding: 0 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 35px;
+            border-radius: 12px;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.07);
+        }
+
+        h2 {
+            color: #17365d;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 12px 22px;
+            background: #17365d;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 15px;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+
+        .button:hover {
+            background: #245184;
+        }
+
+        .secondary {
+            background: #e8edf4;
+            color: #17365d;
+        }
+
+        .secondary:hover {
+            background: #d8e1ed;
+        }
+
+        .status {
+            display: inline-block;
+            background: #e5f5ec;
+            color: #17683b;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+
+        footer {
+            text-align: center;
+            color: #667085;
+            font-size: 13px;
+            margin: 35px 0;
+        }
+    </style>
 </head>
+
 <body>
-    <h1>CampusShield</h1>
-    <h2>Academic Records Portal</h2>
+    <header>
+        <h1>CampusShield</h1>
+        <p>Academic Records Security Portal</p>
+    </header>
 
-    <p>
-        A secure university portal for managing
-        student records and academic information.
-    </p>
+    <main>
+        <div class="card">
+            <h2>Welcome to CampusShield</h2>
 
-    <p>CS2413 Information Security - Team 14</p>
+            <p>
+                CampusShield is a university academic records
+                demonstration system developed for CS2413
+                Information Security.
+            </p>
+
+            <p>
+                The project investigates authentication,
+                database security, authorization, and
+                protection against unauthorized access.
+            </p>
+
+            {% if user %}
+                <div class="status">
+                    Authenticated Session Active
+                </div>
+
+                <h3>Welcome, {{ user["full_name"] }}</h3>
+
+                <p>
+                    <strong>Username:</strong>
+                    {{ user["username"] }}
+                </p>
+
+                <p>
+                    <strong>Role:</strong>
+                    {{ user["role"] }}
+                </p>
+
+                {% if user["role"] == "student" %}
+                    <a class="button"
+                       href="{{ url_for('academic_records') }}">
+                        View My Academic Records
+                    </a>
+                {% else %}
+                    <p>
+                        Privileged dashboard access
+                        is under development.
+                    </p>
+                {% endif %}
+
+                <form method="POST"
+                      action="{{ url_for('logout') }}">
+
+                    <input type="hidden"
+                           name="csrf_token"
+                           value="{{ csrf_token() }}">
+
+                    <button class="button secondary"
+                            type="submit">
+                        Logout
+                    </button>
+                </form>
+
+            {% else %}
+                <h3>Secure Student Access</h3>
+
+                <p>
+                    Sign in to access your academic records.
+                    Authentication is required before
+                    protected information can be viewed.
+                </p>
+
+                <a class="button"
+                   href="{{ url_for('login') }}">
+                    Student Login
+                </a>
+            {% endif %}
+        </div>
+    </main>
+
+    <footer>
+        CS2413 Information Security | Team 14 | Fall 2026
+        <p>
+            Demonstration environment using fictional records.
+        </p>
+    </footer>
 </body>
 </html>

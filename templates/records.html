@@ -3,60 +3,253 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CampusShield - Academic Records</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CampusShield | My Academic Records</title>
+
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 850px;
-            margin: 50px auto;
-            padding: 20px;
-            background: #f4f6f9;
+        * {
+            box-sizing: border-box;
         }
 
-        h1 {
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f9;
+            color: #243247;
+        }
+
+        header {
+            background: #17365d;
+            color: white;
+            padding: 20px 8%;
+        }
+
+        .header-content {
+            max-width: 1100px;
+            margin: auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 27px;
+        }
+
+        header p {
+            margin: 6px 0 0;
+            color: #d6e3f3;
+        }
+
+        main {
+            max-width: 1000px;
+            margin: 45px auto;
+            padding: 0 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.07);
+        }
+
+        h2 {
+            margin-top: 0;
             color: #17365d;
+        }
+
+        .student-info {
+            background: #edf3fa;
+            border-left: 4px solid #17365d;
+            padding: 18px;
+            margin: 20px 0 30px;
+            border-radius: 5px;
+        }
+
+        .student-info p {
+            margin: 7px 0;
+        }
+
+        .status {
+            color: #17683b;
+            font-weight: bold;
         }
 
         table {
             width: 100%;
             border-collapse: collapse;
-            background: white;
-        }
-
-        th, td {
-            padding: 14px;
-            border: 1px solid #ddd;
-            text-align: left;
+            margin-top: 20px;
         }
 
         th {
             background: #17365d;
             color: white;
+            text-align: left;
+            padding: 15px;
+        }
+
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #e2e7ee;
+        }
+
+        tr:nth-child(even) {
+            background: #f8fafc;
+        }
+
+        .grade {
+            font-weight: bold;
+            color: #17365d;
+        }
+
+        .button {
+            display: inline-block;
+            background: #17365d;
+            color: white;
+            padding: 11px 18px;
+            border-radius: 6px;
+            border: none;
+            text-decoration: none;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .logout {
+            background: #b42318;
+        }
+
+        .button:hover {
+            opacity: 0.9;
+        }
+
+        .actions {
+            margin-top: 30px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .actions form {
+            margin: 0;
+        }
+
+        footer {
+            text-align: center;
+            color: #667085;
+            margin: 30px auto;
+            font-size: 13px;
         }
     </style>
 </head>
+
 <body>
-    <h1>CampusShield</h1>
-    <h2>Student Academic Records</h2>
+    <header>
+        <div class="header-content">
+            <div>
+                <h1>CampusShield</h1>
+                <p>Student Academic Records</p>
+            </div>
 
-    <p>Demonstration account: student01</p>
+            <span>Academic Records Portal</span>
+        </div>
+    </header>
 
-    <table>
-        <tr>
-            <th>Course Code</th>
-            <th>Course Title</th>
-            <th>Grade</th>
-        </tr>
+    <main>
+        <div class="card">
+            <h2>My Academic Records</h2>
 
-        {% for record in records %}
-        <tr>
-            <td>{{ record["course_code"] }}</td>
-            <td>{{ record["course_title"] }}</td>
-            <td>{{ record["grade"] }}%</td>
-        </tr>
-        {% endfor %}
-    </table>
+            <p>
+                Your enrolled courses and academic
+                results are displayed below.
+            </p>
 
-    <p><a href="/">Back to Home</a></p>
+            <div class="student-info">
+                <p>
+                    <strong>Student:</strong>
+                    {{ user["full_name"] }}
+                </p>
+
+                <p>
+                    <strong>Username:</strong>
+                    {{ user["username"] }}
+                </p>
+
+                <p>
+                    <strong>Account Role:</strong>
+                    {{ user["role"] }}
+                </p>
+
+                <p class="status">
+                    Authenticated Session
+                </p>
+            </div>
+
+            <h3>Course Results</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Course Code</th>
+                        <th>Course Title</th>
+                        <th>Grade</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% for record in records %}
+                    <tr>
+                        <td>
+                            {{ record["course_code"] }}
+                        </td>
+
+                        <td>
+                            {{ record["course_title"] }}
+                        </td>
+
+                        <td class="grade">
+                            {{ record["grade"] }}%
+                        </td>
+                    </tr>
+
+                    {% else %}
+                    <tr>
+                        <td colspan="3">
+                            No academic records available.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <div class="actions">
+                <a class="button"
+                   href="{{ url_for('home') }}">
+                    Back to Dashboard
+                </a>
+
+                <form method="POST"
+                      action="{{ url_for('logout') }}">
+
+                    <input type="hidden"
+                           name="csrf_token"
+                           value="{{ csrf_token() }}">
+
+                    <button class="button logout"
+                            type="submit">
+                        Logout
+                    </button>
+                </form>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        CampusShield | CS2413 Team 14
+        <p>Fictional academic data for security research.</p>
+    </footer>
 </body>
 </html>
