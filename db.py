@@ -2,39 +2,31 @@
 import sqlite3
 from pathlib import Path
 
-# CampusShield local SQLite database
 DB_PATH = Path(__file__).with_name("campusshield.db")
 
 
 def get_connection():
     """
-    Create a SQLite connection with row-based access
-    and foreign key enforcement enabled.
+    Connect to SQLite with foreign key enforcement.
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
-
-    # SQLite requires foreign keys to be enabled
-    # separately for each database connection.
     conn.execute("PRAGMA foreign_keys = ON")
-
+    conn.execute("PRAGMA busy_timeout = 10000")
     return conn
 
 
 def init_db():
     """
-    Initialize the CampusShield database.
+    Initialize CampusShield tables and indexes.
 
-    Existing tables and records are preserved.
-    Missing tables and indexes are created.
+    Existing records are preserved.
     """
     conn = get_connection()
 
     try:
         conn.executescript("""
-            -- ======================================
             -- USERS
-            -- ======================================
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
@@ -51,18 +43,14 @@ def init_db():
                     CHECK (is_active IN (0, 1))
             );
 
-            -- ======================================
             -- COURSES
-            -- ======================================
             CREATE TABLE IF NOT EXISTS courses (
                 id INTEGER PRIMARY KEY,
                 code TEXT NOT NULL UNIQUE,
                 title TEXT NOT NULL
             );
 
-            -- ======================================
             -- INSTRUCTOR ASSIGNMENTS
-            -- ======================================
             CREATE TABLE IF NOT EXISTS instructor_courses (
                 instructor_id INTEGER NOT NULL
                     REFERENCES users(id),
@@ -70,55 +58,37 @@ def init_db():
                 course_id INTEGER NOT NULL
                     REFERENCES courses(id),
 
-                PRIMARY KEY (
-                    instructor_id,
-                    course_id
-                )
+                PRIMARY KEY (instructor_id, course_id)
             );
 
-            -- ======================================
-            -- STUDENT ENROLLMENTS
-            -- ======================================
+            -- ENROLLMENTS
             CREATE TABLE IF NOT EXISTS enrollments (
                 id INTEGER PRIMARY KEY,
-
                 student_id INTEGER NOT NULL
                     REFERENCES users(id),
-
                 course_id INTEGER NOT NULL
                     REFERENCES courses(id),
 
-                UNIQUE (
-                    student_id,
-                    course_id
-                )
+                UNIQUE (student_id, course_id)
             );
 
-            -- ======================================
-            -- ACADEMIC GRADES
-            -- ======================================
+            -- GRADES
             CREATE TABLE IF NOT EXISTS grades (
                 id INTEGER PRIMARY KEY,
-
                 enrollment_id INTEGER NOT NULL UNIQUE
                     REFERENCES enrollments(id),
 
                 score INTEGER NOT NULL
-                    CHECK (
-                        score BETWEEN 0 AND 100
-                    ),
+                    CHECK (score BETWEEN 0 AND 100),
 
                 updated_at TEXT NOT NULL
                     DEFAULT CURRENT_TIMESTAMP
             );
 
-            -- ======================================
-            -- MFA CREDENTIALS
-            -- ======================================
+            -- ENCRYPTED MFA CREDENTIALS
             CREATE TABLE IF NOT EXISTS mfa_credentials (
                 user_id INTEGER PRIMARY KEY
-                    REFERENCES users(id)
-                    ON DELETE CASCADE,
+                    REFERENCES users(id) ON DELETE CASCADE,
 
                 encrypted_secret TEXT NOT NULL,
 
@@ -126,17 +96,33 @@ def init_db():
                     DEFAULT -1,
 
                 is_enabled INTEGER NOT NULL DEFAULT 0
-                    CHECK (
-                        is_enabled IN (0, 1)
-                    ),
+                    CHECK (is_enabled IN (0, 1)),
 
                 created_at TEXT NOT NULL
                     DEFAULT CURRENT_TIMESTAMP
             );
 
-            -- ======================================
+            -- PERSISTENT AUTHENTICATION THROTTLING
+            CREATE TABLE IF NOT EXISTS auth_attempts (
+                username TEXT NOT NULL,
+
+                stage TEXT NOT NULL CHECK (
+                    stage IN ('password', 'mfa')
+                ),
+
+                failure_count INTEGER NOT NULL DEFAULT 0
+                    CHECK (failure_count >= 0),
+
+                window_started INTEGER NOT NULL,
+
+                locked_until INTEGER NOT NULL DEFAULT 0,
+
+                last_failure INTEGER NOT NULL,
+
+                PRIMARY KEY (username, stage)
+            );
+
             -- INDEXES
-            -- ======================================
             CREATE INDEX IF NOT EXISTS
                 idx_enrollments_student
             ON enrollments(student_id);
@@ -144,6 +130,10 @@ def init_db():
             CREATE INDEX IF NOT EXISTS
                 idx_instructor_courses_course
             ON instructor_courses(course_id);
+
+            CREATE INDEX IF NOT EXISTS
+                idx_auth_attempts_lockout
+            ON auth_attempts(locked_until);
         """)
 
         conn.commit()
@@ -157,7 +147,6 @@ def init_db():
         """).fetchall()
 
         print("CampusShield database initialized.")
-
         print(
             "Tables:",
             ", ".join(row["name"] for row in tables)
