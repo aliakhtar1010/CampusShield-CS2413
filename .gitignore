@@ -221,3 +221,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local database and secrets
+campusshield.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+.venv/
