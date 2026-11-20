@@ -302,3 +302,58 @@ def test_inactive_instructor_denied(client):
         conn.close()
 
     assert client.get("/instructor/").status_code == 403
+
+def test_grade_update_rejects_zero_and_leading_zero_values(client):
+    login_as(client, "instructor01")
+    enrollment = eid("student01", "CS2413")
+    before = grade(enrollment)
+
+    for score in ("0000", "0001", "0100"):
+        response = update(client, enrollment, score)
+        assert response.status_code == 400
+        assert grade(enrollment) == before
+
+
+def test_inactive_instructor_cannot_update_grade(client):
+    login_as(client, "instructor01")
+    enrollment = eid("student01", "CS2413")
+    before = grade(enrollment)
+
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            "UPDATE users SET is_active = 0 WHERE id = ?",
+            (uid("instructor01"),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = update(client, enrollment, "90")
+
+    assert response.status_code == 403
+    assert grade(enrollment) == before
+
+
+def test_revoked_course_assignment_blocks_grade_update(client):
+    login_as(client, "instructor01")
+    enrollment = eid("student01", "CS2413")
+    before = grade(enrollment)
+
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            """
+            DELETE FROM instructor_courses
+            WHERE instructor_id = ? AND course_id = ?
+            """,
+            (uid("instructor01"), cid("CS2413")),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    response = update(client, enrollment, "90")
+
+    assert response.status_code == 403
+    assert grade(enrollment) == before
