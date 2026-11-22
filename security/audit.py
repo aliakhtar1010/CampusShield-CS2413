@@ -137,16 +137,21 @@ def log_event(database, *, key=None, **event_fields):
         conn.execute('BEGIN IMMEDIATE')
         try:
             state = _verify_connection(conn, key)
-            event['timestamp_utc'] = datetime.now(timezone.utc).isoformat(timespec='microseconds')
-            seq = state.sequence + 1
-            digest = _authenticator(key, seq, state.event_hmac, event)
-            conn.execute('''INSERT INTO audit_events
-                (sequence, timestamp_utc, event_type, actor_id, target_type,
-                 target_id, outcome, metadata_json, previous_hmac, event_hmac)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (seq, *(event[field] for field in FIELDS), state.event_hmac, digest))
+            result = _append_connection(conn, key, state, event)
             conn.commit()
-            return ChainState(seq, digest)
+            return result
         except BaseException:
             conn.rollback()
             raise
+
+
+def _append_connection(conn, key, state, event):
+    event['timestamp_utc'] = datetime.now(timezone.utc).isoformat(timespec='microseconds')
+    seq = state.sequence + 1
+    digest = _authenticator(key, seq, state.event_hmac, event)
+    conn.execute('''INSERT INTO audit_events
+        (sequence, timestamp_utc, event_type, actor_id, target_type,
+         target_id, outcome, metadata_json, previous_hmac, event_hmac)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (seq, *(event[field] for field in FIELDS), state.event_hmac, digest))
+    return ChainState(seq, digest)
