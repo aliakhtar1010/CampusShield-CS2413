@@ -140,9 +140,14 @@
                        href="{{ url_for('academic_records') }}">
                         View My Academic Records
                     </a>
+                {% elif user["role"] == "instructor" %}
+                    <a class="button"
+                       href="{{ url_for('instructor.dashboard') }}">
+                        Instructor Dashboard
+                    </a>
                 {% else %}
                     <p>
-                        Privileged dashboard access
+                        Security administrator dashboard
                         is under development.
                     </p>
                 {% endif %}
@@ -185,3 +190,4 @@
     </footer>
 </body>
 </html>
+    
