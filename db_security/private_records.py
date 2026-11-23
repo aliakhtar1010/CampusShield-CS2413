@@ -22,9 +22,14 @@ class PrivateRecordNotFound(LookupError):
 
 def _check_identity(authenticated_user_id: int, student_id: int) -> None:
     """Reject fabricated or cross-student identifiers before running SQL."""
-    if type(authenticated_user_id) is not int or authenticated_user_id <= 0:
+    # SQLite INTEGER supports signed 64-bit values. Reject overflow before SQL.
+    max_sqlite_id = 9223372036854775807
+    if (
+        type(authenticated_user_id) is not int
+        or not 0 < authenticated_user_id <= max_sqlite_id
+    ):
         raise ValueError("Invalid authenticated user ID")
-    if type(student_id) is not int or student_id <= 0:
+    if type(student_id) is not int or not 0 < student_id <= max_sqlite_id:
         raise ValueError("Invalid student ID")
     if authenticated_user_id != student_id:
         raise PrivateRecordAccessDenied("Private record access denied")

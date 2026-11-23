@@ -19,6 +19,7 @@ from flask import (
 
 from db import get_connection
 from routes.instructor import instructor_bp
+from routes.private_records import private_records_bp
 from security.passwords import verify_password
 from security.encryption import decrypt_secret
 from security.mfa import verify_mfa_code
@@ -76,6 +77,7 @@ app.jinja_env.globals["csrf_token"] = csrf_token
 
 # Register Phase 3 instructor routes.
 app.register_blueprint(instructor_bp)
+app.register_blueprint(private_records_bp)
 
 
 def valid_csrf():

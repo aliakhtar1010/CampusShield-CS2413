@@ -32,7 +32,7 @@ _MAX_TOKEN_LENGTH = 4096  # Matches the migration's encrypted-column checks.
 
 
 def _validate_context(student_id: int, field_name: str) -> None:
-    if type(student_id) is not int or student_id <= 0:
+    if type(student_id) is not int or not 0 < student_id <= 9223372036854775807:
         raise ValueError("Invalid student ID")
     if not isinstance(field_name, str) or field_name not in _FIELD_NAMES:
         raise ValueError("Unsupported private field")
