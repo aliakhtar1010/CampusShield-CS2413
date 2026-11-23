@@ -21,7 +21,8 @@ class GradeNotFoundError(LookupError):
 
 
 def _valid_id(value):
-    return type(value) is int and value > 0
+    # SQLite INTEGER bindings are signed 64-bit values. Reject larger IDs.
+    return type(value) is int and 0 < value <= 9223372036854775807
 
 
 def get_instructor_courses(conn, instructor_id):
