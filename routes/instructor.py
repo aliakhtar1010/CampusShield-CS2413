@@ -14,6 +14,7 @@ from flask import (
 )
 
 from db import get_connection
+from security.audit_integration import record_security_event
 from security.authorization import (
     authenticated_user_id,
     get_user,
@@ -45,6 +46,15 @@ def require_instructor(conn):
     user = get_user(conn, user_id)
 
     if user is None or user["role"] != ROLE_INSTRUCTOR:
+        record_security_event(
+            "access_denied",
+            actor_id=user_id,
+            target_type="resource",
+            outcome="denied",
+            metadata={
+                "reason": "wrong_role",
+            },
+        )
         abort(403)
 
     return user
@@ -95,9 +105,23 @@ def dashboard():
         if selected_course is not None:
             course_id = parse_positive_id(selected_course)
 
-            students = get_course_students(
-                conn, user["id"], course_id
-            )
+            try:
+                students = get_course_students(
+                    conn, user["id"], course_id
+                )
+
+            except GradePermissionError:
+                record_security_event(
+                    "access_denied",
+                    actor_id=user["id"],
+                    target_type="course",
+                    target_id=course_id,
+                    outcome="denied",
+                    metadata={
+                        "reason": "not_assigned",
+                    },
+                )
+                abort(403)
 
         return render_template(
             "instructor_dashboard.html",
@@ -137,18 +161,42 @@ def change_grade(enrollment_id):
 
         score = int(raw_score)
 
-        update_grade(
-            conn,
-            user["id"],
-            enrollment_id,
-            score,
+        try:
+            update_grade(
+                conn,
+                user["id"],
+                enrollment_id,
+                score,
+            )
+
+        except (GradePermissionError, GradeNotFoundError):
+            record_security_event(
+                "grade_update",
+                actor_id=user["id"],
+                target_type="grade",
+                target_id=enrollment_id,
+                outcome="denied",
+                metadata={
+                    "reason": "not_assigned",
+                },
+            )
+            abort(403)
+
+        # update_grade commits before returning.
+        # The audit write uses its separate protected database.
+        record_security_event(
+            "grade_update",
+            actor_id=user["id"],
+            target_type="grade",
+            target_id=enrollment_id,
+            outcome="success",
         )
 
-        return redirect(url_for("instructor.dashboard"))
+        return redirect(
+            url_for("instructor.dashboard")
+        )
 
     except GradeValidationError:
         abort(400)
-    except (GradePermissionError, GradeNotFoundError):
-        abort(403)
     finally:
         conn.close()

@@ -14,7 +14,7 @@ from flask import (
     render_template,
     request,
     session,
-    url_for
+    url_for,
 )
 
 from db import get_connection
@@ -23,10 +23,11 @@ from routes.private_records import private_records_bp
 from security.passwords import verify_password
 from security.encryption import decrypt_secret
 from security.mfa import verify_mfa_code
+from security.audit_integration import record_security_event
 from security.throttle import (
     get_auth_status,
     record_auth_failure,
-    reset_auth_failures
+    reset_auth_failures,
 )
 
 
@@ -48,7 +49,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=False,  # Local HTTP only
-    PERMANENT_SESSION_LIFETIME=timedelta(minutes=30)
+    PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
 )
 
 PRIVILEGED_ROLES = {"instructor", "security_admin"}
@@ -75,7 +76,6 @@ def csrf_token():
 
 app.jinja_env.globals["csrf_token"] = csrf_token
 
-# Register Phase 3 instructor routes.
 app.register_blueprint(instructor_bp)
 app.register_blueprint(private_records_bp)
 
@@ -85,7 +85,9 @@ def valid_csrf():
     expected = session.get("csrf_token", "")
 
     return (
-        bool(expected)
+        isinstance(submitted, str)
+        and isinstance(expected, str)
+        and bool(expected)
         and compare_digest(submitted, expected)
     )
 
@@ -183,12 +185,12 @@ def clear_expired_mfa_challenge():
 def home():
     return render_template(
         "index.html",
-        user=current_user()
+        user=current_user(),
     )
 
 
 # ==========================================
-# PASSWORD LOGIN + PERSISTENT THROTTLING
+# PASSWORD LOGIN + AUDIT LOGGING
 # ==========================================
 
 @app.route("/login", methods=["GET", "POST"])
@@ -210,8 +212,6 @@ def login():
             "password", ""
         )
 
-        # Validate username before querying the database
-        # or creating throttling records.
         if not username or len(username) > 150:
             error = "Invalid username or password."
 
@@ -221,6 +221,14 @@ def login():
             )
 
             if status["blocked"]:
+                record_security_event(
+                    "account_lockout",
+                    outcome="denied",
+                    metadata={
+                        "reason": "locked",
+                        "stage": "password",
+                    },
+                )
                 error = LOCKOUT_MESSAGE
 
             else:
@@ -234,12 +242,16 @@ def login():
                         WHERE username = ?
                     """, (username,)).fetchone()
 
+                    account_id = (
+                        user["id"] if user is not None else None
+                    )
+
                     authenticated = (
                         user is not None
                         and user["is_active"] == 1
                         and verify_password(
                             user["password_hash"],
-                            password
+                            password,
                         )
                     )
 
@@ -248,6 +260,27 @@ def login():
                             username, "password"
                         )
 
+                        record_security_event(
+                            "login_failure",
+                            target_id=account_id,
+                            outcome="failure",
+                            metadata={
+                                "reason": "invalid_credentials",
+                                "stage": "password",
+                            },
+                        )
+
+                        if status["blocked"]:
+                            record_security_event(
+                                "account_lockout",
+                                target_id=account_id,
+                                outcome="denied",
+                                metadata={
+                                    "reason": "locked",
+                                    "stage": "password",
+                                },
+                            )
+
                         error = (
                             LOCKOUT_MESSAGE
                             if status["blocked"]
@@ -255,8 +288,6 @@ def login():
                         )
 
                     elif user["role"] in PRIVILEGED_ROLES:
-                        # Check MFA enrollment before
-                        # issuing a pending challenge.
                         credential = conn.execute("""
                             SELECT is_enabled
                             FROM mfa_credentials
@@ -273,21 +304,38 @@ def login():
                             )
 
                         else:
-                            # Successful first factor.
                             reset_auth_failures(
                                 username, "password"
                             )
 
-                            # Do not create fresh MFA challenges
-                            # while the account is MFA-locked.
                             mfa_status = get_auth_status(
                                 username, "mfa"
                             )
 
                             if mfa_status["blocked"]:
+                                record_security_event(
+                                    "account_lockout",
+                                    target_id=user["id"],
+                                    outcome="denied",
+                                    metadata={
+                                        "reason": "locked",
+                                        "stage": "mfa",
+                                    },
+                                )
                                 error = LOCKOUT_MESSAGE
 
                             else:
+                                record_security_event(
+                                    "password_success",
+                                    actor_id=user["id"],
+                                    target_id=user["id"],
+                                    outcome="success",
+                                    metadata={
+                                        "method": "password",
+                                        "stage": "password",
+                                    },
+                                )
+
                                 start_mfa_challenge(user["id"])
 
                                 return redirect(
@@ -297,6 +345,16 @@ def login():
                     elif user["role"] == "student":
                         reset_auth_failures(
                             username, "password"
+                        )
+
+                        record_security_event(
+                            "login_success",
+                            actor_id=user["id"],
+                            target_id=user["id"],
+                            outcome="success",
+                            metadata={
+                                "method": "password",
+                            },
                         )
 
                         establish_session(user["id"])
@@ -313,12 +371,12 @@ def login():
 
     return render_template(
         "login.html",
-        error=error
+        error=error,
     )
 
 
 # ==========================================
-# MFA VERIFICATION + PERSISTENT THROTTLING
+# MFA VERIFICATION + AUDIT LOGGING
 # ==========================================
 
 @app.route("/verify-mfa", methods=["GET", "POST"])
@@ -365,10 +423,18 @@ def verify_mfa():
 
         username = account["username"]
 
-        # Recheck persistent restrictions on every request.
         status = get_auth_status(username, "mfa")
 
         if status["blocked"]:
+            record_security_event(
+                "account_lockout",
+                target_id=account["id"],
+                outcome="denied",
+                metadata={
+                    "reason": "locked",
+                    "stage": "mfa",
+                },
+            )
             session.clear()
             return redirect(url_for("login"))
 
@@ -392,16 +458,13 @@ def verify_mfa():
                 matched_step = verify_mfa_code(
                     decrypted_secret,
                     code,
-                    last_used_step=account["last_used_step"]
+                    last_used_step=account["last_used_step"],
                 )
 
             except (ValueError, RuntimeError):
-                # Fail closed if a secret cannot be
-                # decrypted or verified.
                 matched_step = None
 
             if matched_step is not None:
-                # Atomic replay protection.
                 cursor = conn.execute("""
                     UPDATE mfa_credentials
                     SET last_used_step = ?
@@ -411,7 +474,7 @@ def verify_mfa():
                 """, (
                     matched_step,
                     pending_user_id,
-                    matched_step
+                    matched_step,
                 ))
 
                 if cursor.rowcount == 1:
@@ -419,6 +482,27 @@ def verify_mfa():
 
                     reset_auth_failures(
                         username, "mfa"
+                    )
+
+                    record_security_event(
+                        "mfa_success",
+                        actor_id=account["id"],
+                        target_id=account["id"],
+                        outcome="success",
+                        metadata={
+                            "method": "password_mfa",
+                            "stage": "mfa",
+                        },
+                    )
+
+                    record_security_event(
+                        "login_success",
+                        actor_id=account["id"],
+                        target_id=account["id"],
+                        outcome="success",
+                        metadata={
+                            "method": "password_mfa",
+                        },
                     )
 
                     establish_session(
@@ -431,9 +515,19 @@ def verify_mfa():
 
                 conn.rollback()
 
-            # Failed second-factor verification.
             status = record_auth_failure(
                 username, "mfa"
+            )
+
+            record_security_event(
+                "mfa_failure",
+                actor_id=account["id"],
+                target_id=account["id"],
+                outcome="failure",
+                metadata={
+                    "reason": "invalid_code",
+                    "stage": "mfa",
+                },
             )
 
             session["mfa_attempts"] = (
@@ -449,6 +543,15 @@ def verify_mfa():
                 status["blocked"]
                 or attempts_remaining <= 0
             ):
+                record_security_event(
+                    "account_lockout",
+                    target_id=account["id"],
+                    outcome="denied",
+                    metadata={
+                        "reason": "locked",
+                        "stage": "mfa",
+                    },
+                )
                 session.clear()
                 return redirect(
                     url_for("login")
@@ -465,7 +568,7 @@ def verify_mfa():
             attempts_remaining=(
                 MAX_MFA_ATTEMPTS
                 - session.get("mfa_attempts", 0)
-            )
+            ),
         )
 
     finally:
@@ -482,6 +585,15 @@ def academic_records():
     user = current_user()
 
     if user["role"] != "student":
+        record_security_event(
+            "access_denied",
+            actor_id=user["id"],
+            target_type="resource",
+            outcome="denied",
+            metadata={
+                "reason": "wrong_role",
+            },
+        )
         abort(403)
 
     conn = get_connection()
@@ -510,7 +622,7 @@ def academic_records():
     return render_template(
         "records.html",
         records=records,
-        user=user
+        user=user,
     )
 
 
@@ -523,6 +635,7 @@ def logout():
     if not valid_csrf():
         abort(400)
 
+    # Logout is not in Abdullah's current event schema.
     session.clear()
 
     return redirect(url_for("login"))
@@ -535,5 +648,5 @@ def logout():
 if __name__ == "__main__":
     app.run(
         debug=True,
-        host="127.0.0.1"
+        host="127.0.0.1",
     )
