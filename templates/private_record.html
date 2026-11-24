@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CampusShield | Private Contact</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: Arial, sans-serif; background: #f4f6f9; color: #243247; }
+        header { background: #17365d; color: white; padding: 22px 8%; }
+        header h1 { margin: 0; font-size: 27px; }
+        header p { margin: 6px 0 0; color: #d6e3f3; }
+        main { max-width: 760px; margin: 45px auto; padding: 0 20px; }
+        .card { background: white; padding: 35px; border-radius: 12px; box-shadow: 0 4px 18px rgba(0,0,0,.07); }
+        h2 { margin-top: 0; color: #17365d; }
+        label { display: block; font-weight: bold; margin: 20px 0 7px; }
+        input { width: 100%; padding: 12px; border: 1px solid #b7c4d3; border-radius: 6px; font-size: 15px; }
+        input:focus { outline: 2px solid #366b9d; outline-offset: 2px; }
+        .button { display: inline-block; margin-top: 20px; padding: 12px 20px; background: #17365d; color: white; border: 0; border-radius: 6px; cursor: pointer; font-size: 14px; text-decoration: none; }
+        .secondary { background: #e8edf4; color: #17365d; margin-left: 8px; }
+        .notice { padding: 12px; border-radius: 6px; margin: 18px 0; }
+        .success { background: #e6f5eb; color: #17683b; }
+        .error { background: #fde8e7; color: #922b22; }
+        .hint { color: #526171; font-size: 14px; }
+        footer { text-align: center; color: #667085; font-size: 13px; margin: 30px; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>CampusShield</h1>
+        <p>Encrypted Student Contact Information</p>
+    </header>
+    <main>
+        <section class="card">
+            <h2>My Private Contact</h2>
+            <p><strong>Signed in as:</strong> {{ user["full_name"] }} ({{ user["username"] }})</p>
+            <p class="hint">Only your authenticated student account can access these fictional contact details. The database stores Fernet-encrypted values.</p>
+            {% if saved %}
+                <div class="notice success" role="status">Private contact details saved securely.</div>
+            {% endif %}
+            {% if error %}
+                <div class="notice error" role="alert">{{ error }}</div>
+            {% endif %}
+            <form method="POST" action="{{ url_for('private_records.contact') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" value="{{ email }}" maxlength="254" autocomplete="email" required>
+                <label for="phone">Phone (international E.164 format)</label>
+                <input type="tel" id="phone" name="phone" value="{{ phone }}" placeholder="+15065550123" autocomplete="tel" required>
+                <p class="hint">Use + followed by 8–15 digits, without spaces.</p>
+                <button type="submit" class="button">Save encrypted contact</button>
+                <a class="button secondary" href="{{ url_for('academic_records') }}">Back to Academic Records</a>
+            </form>
+        </section>
+    </main>
+    <footer>CampusShield | CS2413 Team 14 | Fictional data only</footer>
+</body>
+</html>
