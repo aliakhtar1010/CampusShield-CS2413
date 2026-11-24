@@ -5,25 +5,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CampusShield | My Academic Records</title>
-
     <style>
-        * {
-            box-sizing: border-box;
-        }
-
+        * { box-sizing: border-box; }
         body {
             margin: 0;
             font-family: Arial, sans-serif;
             background: #f4f6f9;
             color: #243247;
         }
-
         header {
             background: #17365d;
             color: white;
             padding: 20px 8%;
         }
-
         .header-content {
             max-width: 1100px;
             margin: auto;
@@ -33,35 +27,20 @@
             gap: 15px;
             flex-wrap: wrap;
         }
-
-        header h1 {
-            margin: 0;
-            font-size: 27px;
-        }
-
-        header p {
-            margin: 6px 0 0;
-            color: #d6e3f3;
-        }
-
+        header h1 { margin: 0; font-size: 27px; }
+        header p { margin: 6px 0 0; color: #d6e3f3; }
         main {
             max-width: 1000px;
             margin: 45px auto;
             padding: 0 20px;
         }
-
         .card {
             background: white;
             padding: 30px;
             border-radius: 12px;
             box-shadow: 0 4px 18px rgba(0, 0, 0, 0.07);
         }
-
-        h2 {
-            margin-top: 0;
-            color: #17365d;
-        }
-
+        h2 { margin-top: 0; color: #17365d; }
         .student-info {
             background: #edf3fa;
             border-left: 4px solid #17365d;
@@ -69,43 +48,25 @@
             margin: 20px 0 30px;
             border-radius: 5px;
         }
-
-        .student-info p {
-            margin: 7px 0;
-        }
-
-        .status {
-            color: #17683b;
-            font-weight: bold;
-        }
-
+        .student-info p { margin: 7px 0; }
+        .status { color: #17683b; font-weight: bold; }
         table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
         }
-
         th {
             background: #17365d;
             color: white;
             text-align: left;
             padding: 15px;
         }
-
         td {
             padding: 15px;
             border-bottom: 1px solid #e2e7ee;
         }
-
-        tr:nth-child(even) {
-            background: #f8fafc;
-        }
-
-        .grade {
-            font-weight: bold;
-            color: #17365d;
-        }
-
+        tr:nth-child(even) { background: #f8fafc; }
+        .grade { font-weight: bold; color: #17365d; }
         .button {
             display: inline-block;
             background: #17365d;
@@ -117,26 +78,15 @@
             cursor: pointer;
             font-size: 14px;
         }
-
-        .logout {
-            background: #b42318;
-        }
-
-        .button:hover {
-            opacity: 0.9;
-        }
-
+        .logout { background: #b42318; }
+        .button:hover { opacity: 0.9; }
         .actions {
             margin-top: 30px;
             display: flex;
             gap: 12px;
             flex-wrap: wrap;
         }
-
-        .actions form {
-            margin: 0;
-        }
-
+        .actions form { margin: 0; }
         footer {
             text-align: center;
             color: #667085;
@@ -145,7 +95,6 @@
         }
     </style>
 </head>
-
 <body>
     <header>
         <div class="header-content">
@@ -153,7 +102,6 @@
                 <h1>CampusShield</h1>
                 <p>Student Academic Records</p>
             </div>
-
             <span>Academic Records Portal</span>
         </div>
     </header>
@@ -161,7 +109,6 @@
     <main>
         <div class="card">
             <h2>My Academic Records</h2>
-
             <p>
                 Your enrolled courses and academic
                 results are displayed below.
@@ -172,20 +119,15 @@
                     <strong>Student:</strong>
                     {{ user["full_name"] }}
                 </p>
-
                 <p>
                     <strong>Username:</strong>
                     {{ user["username"] }}
                 </p>
-
                 <p>
                     <strong>Account Role:</strong>
                     {{ user["role"] }}
                 </p>
-
-                <p class="status">
-                    Authenticated Session
-                </p>
+                <p class="status">Authenticated Session</p>
             </div>
 
             <h3>Course Results</h3>
@@ -198,23 +140,15 @@
                         <th>Grade</th>
                     </tr>
                 </thead>
-
                 <tbody>
                     {% for record in records %}
                     <tr>
-                        <td>
-                            {{ record["course_code"] }}
-                        </td>
-
-                        <td>
-                            {{ record["course_title"] }}
-                        </td>
-
+                        <td>{{ record["course_code"] }}</td>
+                        <td>{{ record["course_title"] }}</td>
                         <td class="grade">
                             {{ record["grade"] }}%
                         </td>
                     </tr>
-
                     {% else %}
                     <tr>
                         <td colspan="3">
@@ -227,17 +161,20 @@
 
             <div class="actions">
                 <a class="button"
+                   href="{{ url_for('private_records.contact') }}">
+                    My Private Contact
+                </a>
+
+                <a class="button"
                    href="{{ url_for('home') }}">
                     Back to Dashboard
                 </a>
 
                 <form method="POST"
                       action="{{ url_for('logout') }}">
-
                     <input type="hidden"
                            name="csrf_token"
                            value="{{ csrf_token() }}">
-
                     <button class="button logout"
                             type="submit">
                         Logout
